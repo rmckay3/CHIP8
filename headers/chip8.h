@@ -2,6 +2,7 @@
 #define CHIP8_H
 
 #include <cstdint>
+#include <random>
 
 class Chip8 {
 public:
@@ -16,6 +17,8 @@ public:
   uint8_t keypad[16]{};
   uint32_t video[64 * 32]{};
   uint16_t opcode{};
+  std::default_random_engine randGen;
+  std::uniform_int_distribution<uint8_t> randByte;
 
   Chip8();
   void LoadROM(char const *filename);
