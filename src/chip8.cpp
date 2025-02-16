@@ -40,6 +40,65 @@ Chip8::Chip8()
   for (unsigned int i = 0; i < FONTSET_SIZE; ++i) {
     this->memory[FONTSENT_START_ADDRESS + i] = fontset[i];
   }
+
+  // Initialize function tables
+  for (size_t i = 0; i < 0xE; ++i) {
+    this->table0[i] = &Chip8::OP_NULL;
+    this->table8[i] = &Chip8::OP_NULL;
+    this->tableE[i] = &Chip8::OP_NULL;
+  }
+
+  for (size_t i = 0; i < 0x65; ++i) {
+    this->tableF[i] = &Chip8::OP_NULL;
+  }
+
+  // Set Table 0 functions
+  this->table0[0x0] = &Chip8::OP_00E0;
+  this->table0[0xE] = &Chip8::OP_00EE;
+
+  // Set Table 8 functions
+  this->table8[0x0] = &Chip8::OP_8xy0;
+  this->table8[0x1] = &Chip8::OP_8xy1;
+  this->table8[0x2] = &Chip8::OP_8xy2;
+  this->table8[0x3] = &Chip8::OP_8xy3;
+  this->table8[0x4] = &Chip8::OP_8xy4;
+  this->table8[0x5] = &Chip8::OP_8xy5;
+  this->table8[0x6] = &Chip8::OP_8xy6;
+  this->table8[0x7] = &Chip8::OP_8xy7;
+  this->table8[0xE] = &Chip8::OP_8xyE;
+
+  // Set Table E functions
+  this->tableE[0xE] = &Chip8::OP_Ex9E;
+  this->tableE[0x1] = &Chip8::OP_ExA1;
+
+  // Set Table F functions
+  this->tableF[0x07] = &Chip8::OP_Fx07;
+  this->tableF[0x0A] = &Chip8::OP_Fx0A;
+  this->tableF[0x15] = &Chip8::OP_Fx15;
+  this->tableF[0x18] = &Chip8::OP_Fx18;
+  this->tableF[0x1E] = &Chip8::OP_Fx1E;
+  this->tableF[0x29] = &Chip8::OP_Fx29;
+  this->tableF[0x33] = &Chip8::OP_Fx33;
+  this->tableF[0x55] = &Chip8::OP_Fx55;
+  this->tableF[0x65] = &Chip8::OP_Fx65;
+
+  // Set Table functions
+  this->table[0x0] = &Chip8::Table0;
+  this->table[0x1] = &Chip8::OP_1nnn;
+  this->table[0x2] = &Chip8::OP_2nnn;
+  this->table[0x3] = &Chip8::OP_3xkk;
+  this->table[0x4] = &Chip8::OP_4xkk;
+  this->table[0x5] = &Chip8::OP_5xy0;
+  this->table[0x6] = &Chip8::OP_6xkk;
+  this->table[0x7] = &Chip8::OP_7xkk;
+  this->table[0x8] = &Chip8::Table8;
+  this->table[0x9] = &Chip8::OP_9xy0;
+  this->table[0xA] = &Chip8::OP_Annn;
+  this->table[0xB] = &Chip8::OP_Bnnn;
+  this->table[0xC] = &Chip8::OP_Cxkk;
+  this->table[0xD] = &Chip8::OP_Dxyn;
+  this->table[0xE] = &Chip8::TableE;
+  this->table[0xF] = &Chip8::TableF;
 }
 
 void Chip8::LoadROM(char const *filename) {
@@ -66,6 +125,24 @@ void Chip8::LoadROM(char const *filename) {
 }
 
 ///
+/// Function to represent 1 Cycle of the CPU
+///
+void Chip8::Cycle() {
+  // Fetch Opcode
+  this->opcode = (this->memory[this->pc] << 8u) | this->memory[this->pc + 1];
+
+  // Move Program Counter forward
+  this->pc += 2;
+
+  // Decode Opcode and Execute its function
+  ((*this).*(this->table[(this->opcode & 0xF000u) >> 12u]))();
+
+  // Decrement Delay and Sound Timers if they exist
+  if (this->delayTimer > 0) { --this->delayTimer; }
+  if (this->soundTimer > 0) { --this->soundTimer; }
+}
+
+///
 /// CLS: Clear Display
 ///
 void Chip8::OP_00E0() { memset(this->video, 0, sizeof(this->video)); }
@@ -82,7 +159,7 @@ void Chip8::OP_00EE() {
 /// JP addr: Jump to location nnn. PC set to nnn
 ///
 void Chip8::OP_1nnn() {
-  u_int16_t address = this->opcode & 0x0FFFu;
+  uint16_t address = this->opcode & 0x0FFFu;
   this->pc = address;
 }
 
@@ -90,7 +167,7 @@ void Chip8::OP_1nnn() {
 /// CALL addr: Call Subroutine at nnn.
 ///
 void Chip8::OP_2nnn() {
-  u_int16_t address = this->opcode & 0x0FFFu;
+  uint16_t address = this->opcode & 0x0FFFu;
 
   this->stack[this->sp] = this->pc;
   ++this->sp;
@@ -101,8 +178,8 @@ void Chip8::OP_2nnn() {
 /// SE Vx, byte: Skip next instruction if register Vx == kk
 ///
 void Chip8::OP_3xkk() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  u_int8_t byte = this->opcode & 0x00FFu;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t byte = this->opcode & 0x00FFu;
 
   if (this->registers[Vx] == byte) {
     this->pc += 2;
@@ -112,8 +189,8 @@ void Chip8::OP_3xkk() {
 ///
 /// SNE Vx, byte: Skip next instruction if register Vx != kk
 void Chip8::OP_4xkk() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  u_int8_t byte = this->opcode & 0x00FFu;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t byte = this->opcode & 0x00FFu;
 
   if (this->registers[Vx] != byte) {
     this->pc += 2;
@@ -124,8 +201,8 @@ void Chip8::OP_4xkk() {
 /// SE Vx, Vy: skip next instruciton if register Vx == register Vy
 ///
 void Chip8::OP_5xy0() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  u_int8_t Vy = (this->opcode & 0x00F0u) >> 4u;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t Vy = (this->opcode & 0x00F0u) >> 4u;
 
   if (this->registers[Vx] == this->registers[Vy]) {
     this->pc += 2;
@@ -136,8 +213,8 @@ void Chip8::OP_5xy0() {
 /// LD Vx, byte: Set Vx == kk;
 ///
 void Chip8::OP_6xkk() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  u_int8_t byte = this->opcode & 0x00FFu;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t byte = this->opcode & 0x00FFu;
 
   this->registers[Vx] = byte;
 }
@@ -146,8 +223,8 @@ void Chip8::OP_6xkk() {
 /// ADD Vx, Byte: Add value to Vx register
 ///
 void Chip8::OP_7xkk() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  u_int8_t byte = this->opcode & 0x00FFu;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t byte = this->opcode & 0x00FFu;
 
   this->registers[Vx] += byte;
 }
@@ -156,8 +233,8 @@ void Chip8::OP_7xkk() {
 /// LD Vx, Vy: Set register Vx to Vy
 ///
 void Chip8::OP_8xy0() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  u_int8_t Vy = (this->opcode & 0x00F0u) >> 4u;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t Vy = (this->opcode & 0x00F0u) >> 4u;
 
   this->registers[Vx] = this->registers[Vy];
 }
@@ -166,8 +243,8 @@ void Chip8::OP_8xy0() {
 /// OR Vx, Vy: Set Vx = Vx | Vy
 ///
 void Chip8::OP_8xy1() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  u_int8_t Vy = (this->opcode & 0x00F0u) >> 4u;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t Vy = (this->opcode & 0x00F0u) >> 4u;
 
   this->registers[Vx] |= this->registers[Vy];
 }
@@ -176,8 +253,8 @@ void Chip8::OP_8xy1() {
 /// AND Vx, Vy: Set Vx = Vx & Vy
 ///
 void Chip8::OP_8xy2() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  u_int8_t Vy = (this->opcode & 0x00F0u) >> 4u;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t Vy = (this->opcode & 0x00F0u) >> 4u;
 
   this->registers[Vx] &= this->registers[Vy];
 }
@@ -186,8 +263,8 @@ void Chip8::OP_8xy2() {
 /// XOR Vx, Vy: Set Vx = Vx ^ Vy
 ///
 void Chip8::OP_8xy3() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  u_int8_t Vy = (this->opcode & 0x00F0u) >> 4u;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t Vy = (this->opcode & 0x00F0u) >> 4u;
 
   this->registers[Vx] ^= this->registers[Vy];
 }
@@ -196,10 +273,10 @@ void Chip8::OP_8xy3() {
 /// ADD Vx, Vy: Set Vx = Vx + Vy, set VF = carry
 ///
 void Chip8::OP_8xy4() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  u_int8_t Vy = (this->opcode & 0x00F0u) >> 4u;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t Vy = (this->opcode & 0x00F0u) >> 4u;
 
-  u_int16_t sum = Vx + Vy;
+  uint16_t sum = Vx + Vy;
 
   this->registers[0xF] = sum > 255u;
   this->registers[Vx] = sum & 0xFFu;
@@ -209,8 +286,8 @@ void Chip8::OP_8xy4() {
 /// SUB Vx, Vy: Set Vx = Vx - Vy, set VF = NOT borrow (Vx > Vy)
 ///
 void Chip8::OP_8xy5() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  u_int8_t Vy = (this->opcode & 0x00F0u) >> 4u;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t Vy = (this->opcode & 0x00F0u) >> 4u;
 
   this->registers[0xF] = this->registers[Vx] > this->registers[Vy];
   this->registers[Vx] -= this->registers[Vy];
@@ -221,7 +298,7 @@ void Chip8::OP_8xy5() {
 /// Divide Vx by 2
 ///
 void Chip8::OP_8xy6() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
 
   this->registers[0xF] = this->registers[Vx] & 01u;
   this->registers[Vx] >>= 1; // Shift right 1 == Divide by 2;
@@ -231,8 +308,8 @@ void Chip8::OP_8xy6() {
 /// SUB Vy, Vx: Set Vx = Vy - Vx, set VF = NOT borrow (Vy > Vx)
 ///
 void Chip8::OP_8xy7() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  u_int8_t Vy = (this->opcode & 0x00F0u) >> 4u;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t Vy = (this->opcode & 0x00F0u) >> 4u;
 
   this->registers[0xF] = this->registers[Vy] > this->registers[Vx];
   this->registers[Vx] = this->registers[Vy] - this->registers[Vx];
@@ -242,7 +319,7 @@ void Chip8::OP_8xy7() {
 /// SHL Vx: Save Most significant bit in VF. Multiple by 2
 ///
 void Chip8::OP_8xyE() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
 
   this->registers[0xF] = (this->registers[Vx] & 0x80u) >> 7u;
   this->registers[Vx] <<= 1;
@@ -252,8 +329,8 @@ void Chip8::OP_8xyE() {
 /// SNE Vx, Vy: Skip next instruction if Vx != Vy
 ///
 void Chip8::OP_9xy0() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  u_int8_t Vy = (this->opcode & 0x00F0u) >> 4u;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t Vy = (this->opcode & 0x00F0u) >> 4u;
 
   if (this->registers[Vx] != this->registers[Vy]) { this->pc += 2; }
 }
@@ -263,7 +340,7 @@ void Chip8::OP_9xy0() {
 /// Set I = nnn
 ///
 void Chip8::OP_Annn() {
-  u_int16_t address = this->opcode & 0x0FFFu;
+  uint16_t address = this->opcode & 0x0FFFu;
 
   this->index = address;
 }
@@ -272,7 +349,7 @@ void Chip8::OP_Annn() {
 /// JMP V0, addr: Jump to location + V0
 ///
 void Chip8::OP_Bnnn() {
-  u_int16_t address = this->opcode & 0x0FFFu;
+  uint16_t address = this->opcode & 0x0FFFu;
 
   this->pc = this->registers[0] + address;
 }
@@ -281,22 +358,22 @@ void Chip8::OP_Bnnn() {
 /// RND Vx, byte: Set Vx to Rand Byte AND kk
 ///
 void Chip8::OP_Cxkk() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  u_int8_t byte = this->opcode & 0x00FFu;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t byte = this->opcode & 0x00FFu;
 
-  this->registers[Vx] = this->randGen(this->randByte) & byte;
+  this->registers[Vx] = this->randByte(this->randGen) & byte;
 }
 
 ///
 /// DRW Vx, Vy, nibble: Display n-sprite at memory location I at (Vx, Vy), set VF = collision
 ///
 void Chip8::OP_Dxyn() {
-  u_int8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  u_int8_t Vy = (this->opcode & 0x00F0u) >> 4u;
-  u_int8_t height = this->opcode & 0x000Fu;
+  uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
+  uint8_t Vy = (this->opcode & 0x00F0u) >> 4u;
+  uint8_t height = this->opcode & 0x000Fu;
 
-  u_int8_t x = this->registers[Vx] % VIDEO_WIDTH;
-  u_int8_t y = this->registers[Vy] % VIDEO_HEIGHT;
+  uint8_t x = this->registers[Vx] % VIDEO_WIDTH;
+  uint8_t y = this->registers[Vy] % VIDEO_HEIGHT;
 
   this->registers[0xF] = 0;
 
@@ -351,7 +428,7 @@ void Chip8::OP_Fx07() {
 ///
 void Chip8::OP_Fx0A() {
   uint8_t Vx = (this->opcode & 0x0F00u) >> 8u;
-  uint8_t key = 16
+  uint8_t key = 16;
 
   for (unsigned int keyPress = 0; keyPress < key; ++keyPress) {
     if (this->keypad[keyPress]) {
@@ -413,7 +490,7 @@ void Chip8::OP_Fx33() {
   value /= 10;
 
   // Tens Place
-  this->memory[this->index + 1] = value % 10
+  this->memory[this->index + 1] = value % 10;
   value /= 10;
 
   // Ones Place
@@ -441,3 +518,36 @@ void Chip8::OP_Fx65() {
     this->registers[i] = this->memory[this->index + i];
   }
 }
+
+///
+/// Table 0 Getter
+///
+void Chip8::Table0() {
+  ((*this).*(this->table0[this->opcode & 0x000Fu]))();
+}
+
+///
+/// Table 0 Getter
+///
+void Chip8::Table8() {
+  ((*this).*(this->table8[this->opcode & 0x000Fu]))();
+}
+
+///
+/// Table 0 Getter
+///
+void Chip8::TableE() {
+  ((*this).*(this->tableE[this->opcode & 0x000Fu]))();
+}
+
+///
+/// Table 0 Getter
+///
+void Chip8::TableF() {
+  ((*this).*(this->tableF[this->opcode & 0x00FFu]))();
+}
+
+/// 
+/// Empty Function
+///
+void Chip8::OP_NULL() { }
